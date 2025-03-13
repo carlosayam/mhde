@@ -37,6 +37,7 @@ impl<B: AutodiffBackend> BHatModel<B> {
         let v = v.powi_scalar(2);
         let v = (v + 1.0) * self.scale.val() * PI;
         let pdf = v.powi_scalar(-1);
+        // now calculate B hat, eq (3) in paper (the normalizing factor is applied later)
         let v = (pdf * balls.clone()).powf_scalar(0.5);
         v.sum()
     }
