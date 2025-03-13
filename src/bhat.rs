@@ -112,8 +112,8 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let data = Tensor::from_data(vec.as_slice(), &device);
 
     let mut model = BHatModel {
-        loc: Param::initialized(ParamId::new(), loc),
-        scale: Param::initialized(ParamId::new(), scale),
+        loc: Param::from_tensor(loc),
+        scale: Param::from_tensor(scale),
     };
     println!("Starting val");
     println!("Loc: {}", model.loc.val().clone().into_scalar());
