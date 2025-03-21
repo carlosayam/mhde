@@ -2,7 +2,6 @@ use burn::{
     module::{
         Module,
         Param,
-        ParamId,
     },
     optim::{AdamConfig, GradientsParams, Optimizer},
     prelude::{
@@ -13,6 +12,7 @@ use burn::{
     tensor::backend::AutodiffBackend,
 };
 
+use core::f64;
 use std::f64::consts::PI;
 
 use rand_chacha::ChaCha8Rng;
@@ -22,6 +22,8 @@ use rand::distributions::Distribution;
 use statrs::distribution::Cauchy;
 use linfa_nn::{BallTree, distance::L1Dist, NearestNeighbour};
 use ndarray::{Array, array};
+
+use burn::tensor::ElementConversion;
 
 #[derive(Module, Debug)]
 pub struct BHatModel<B: Backend> {
@@ -79,13 +81,13 @@ fn min_median_max(numbers: &Vec<f64>) -> (f64, f64, f64) {
 #[derive(Config)]
 pub struct TrainingConfig {
 
-    #[config(default = 100)]
+    #[config(default = 1000)]
     pub num_runs: usize,
 
     #[config(default = 42)]
     pub seed: u64,
 
-    #[config(default = 1e-2)]
+    #[config(default = 0.1)]
     pub lr: f64,
 
     pub config_optimizer: AdamConfig,
@@ -97,10 +99,10 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let config = TrainingConfig::new(config_optimizer);
 
     let mut rng: ChaCha8Rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let num: usize = 10;
+    let num: usize = 250;
 
     // create random vec
-    let dist: Cauchy = Cauchy::new(5.0, 2.0).unwrap();
+    let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
     let vec = Vec::from_iter((0..num).map(|_| dist.sample(&mut rng)));
 
     let (v_min, v_med, v_max) = min_median_max(&vec);
@@ -108,7 +110,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let factor = -2.0 / ((num as f64) * PI).sqrt();   // makes negative so we minimize BHat
 
     let loc = Tensor::from_data([v_med], &device);
-    let scale = Tensor::from_data([v_max - v_min], &device);
+    let scale = Tensor::from_data([(v_max - v_min) / (num as f64)], &device);
     let data = Tensor::from_data(vec.as_slice(), &device);
 
     let mut model = BHatModel {
@@ -129,8 +131,13 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         let grads = GradientsParams::from_grads(grads, &model);
 
         model = optimizer.step(config.lr, model, grads);
-        if ix % 10 == 0 {
-            println!("BHat: {}", bhat.into_scalar());
+        let bhat_val: f64 = bhat.into_scalar().elem::<f64>();
+
+        if ix % 50 == 0 {
+            println!("BHat: {} ({})", bhat_val, ix / 100);
+        }
+        if bhat_val < -0.99 {
+            break;
         }
 
     }
