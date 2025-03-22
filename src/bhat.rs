@@ -5,9 +5,7 @@ use burn::{
     },
     optim::{AdamConfig, GradientsParams, Optimizer},
     prelude::{
-        Tensor,
-        Backend,
-        Config,
+        Backend, Config, Tensor
     },
     tensor::backend::AutodiffBackend,
 };
@@ -118,31 +116,38 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         scale: Param::from_tensor(scale),
     };
     println!("Starting val");
-    println!("Loc: {}", model.loc.val().clone().into_scalar());
-    println!("Scale: {}", model.scale.val().clone().into_scalar());
+    println!("Loc: {} [id={}]", model.loc.val().clone().into_scalar(), model.loc.id.val());
+    println!("Scale: {} [id={}]", model.scale.val().clone().into_scalar(), model.scale.id.val());
 
     let mut optimizer = config.config_optimizer.init();
+    let epsilon: f64 = 0.001;
 
     for ix in 1..config.num_runs + 1 {
 
         let bhat = model.forward(&data, &balls) * factor;
 
         let grads = bhat.backward();
-        let grads = GradientsParams::from_grads(grads, &model);
 
-        model = optimizer.step(config.lr, model, grads);
+        let grads_container = GradientsParams::from_grads(grads, &model);
+
+        let loc_grad = grads_container.get::<B, 1>(model.loc.id).unwrap();
+        let scale_grad = grads_container.get::<B,1>(model.scale.id).unwrap();
+        let loc_grad: f64 = loc_grad.into_scalar().elem();
+        let scale_grad: f64 = scale_grad.into_scalar().elem();
+
+        model = optimizer.step(config.lr, model, grads_container);
         let bhat_val: f64 = bhat.into_scalar().elem::<f64>();
 
         if ix % 50 == 0 {
             println!("BHat: {} ({})", bhat_val, ix / 100);
         }
-        if bhat_val < -0.99 {
+        if loc_grad.abs() < epsilon && scale_grad.abs() < epsilon {
             break;
         }
 
     }
 
     println!("Starting end");
-    println!("Loc: {}", model.loc.val().clone().into_scalar());
-    println!("Scale: {}", model.scale.val().clone().into_scalar());
+    println!("Loc: {} [id={}]", model.loc.val().clone().into_scalar(), model.loc.id);
+    println!("Scale: {} [id={}]", model.scale.val().clone().into_scalar(), model.scale.id);
 }
