@@ -97,7 +97,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let config = TrainingConfig::new(config_optimizer);
 
     let mut rng: ChaCha8Rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let num: usize = 10000;
+    let num: usize = 8000;
 
     // create random vec
     let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
@@ -115,6 +115,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         loc: Param::from_tensor(loc),
         scale: Param::from_tensor(scale),
     };
+    println!("Sample size: {}", vec.len());
     println!("Starting params");
     println!("Loc: {}", model.loc.val().clone().into_scalar());
     println!("Scale: {}\n", model.scale.val().clone().into_scalar());
@@ -140,7 +141,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         let bhat_val: f64 = bhat.into_scalar().elem::<f64>();
 
         if ix % 10 == 0 {
-            println!("BHat: {} ({})", bhat_val, ix / 100);
+            println!("BHat: {} ({})", bhat_val, ix);
         }
         if loc_grad.abs() < epsilon && scale_grad.abs() < epsilon {
             break;
