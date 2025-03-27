@@ -82,7 +82,7 @@ pub struct TrainingConfig {
     #[config(default = 1000)]
     pub num_runs: usize,
 
-    #[config(default = 42)]
+    #[config(default = 41)]
     pub seed: u64,
 
     #[config(default = 0.1)]
@@ -97,7 +97,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let config = TrainingConfig::new(config_optimizer);
 
     let mut rng: ChaCha8Rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let num: usize = 500;
+    let num: usize = 10000;
 
     // create random vec
     let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
