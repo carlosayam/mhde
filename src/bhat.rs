@@ -97,7 +97,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let config = TrainingConfig::new(config_optimizer);
 
     let mut rng: ChaCha8Rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let num: usize = 250;
+    let num: usize = 500;
 
     // create random vec
     let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
@@ -116,13 +116,14 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         scale: Param::from_tensor(scale),
     };
     println!("Starting val");
-    println!("Loc: {} [id={}]", model.loc.val().clone().into_scalar(), model.loc.id.val());
-    println!("Scale: {} [id={}]", model.scale.val().clone().into_scalar(), model.scale.id.val());
+    println!("Loc: {}", model.loc.val().clone().into_scalar());
+    println!("Scale: {}", model.scale.val().clone().into_scalar());
 
     let mut optimizer = config.config_optimizer.init();
-    let epsilon: f64 = 0.001;
+    let epsilon: f64 = 0.000001;
 
-    for ix in 1..config.num_runs + 1 {
+    let mut ix = 1;
+    while ix <= config.num_runs {
 
         let bhat = model.forward(&data, &balls) * factor;
 
@@ -130,24 +131,24 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
 
         let grads_container = GradientsParams::from_grads(grads, &model);
 
-        let loc_grad = grads_container.get::<B, 1>(model.loc.id).unwrap();
-        let scale_grad = grads_container.get::<B,1>(model.scale.id).unwrap();
+        let loc_grad = grads_container.get::<B::InnerBackend, 1>(model.loc.id).unwrap();
+        let scale_grad = grads_container.get::<B::InnerBackend, 1>(model.scale.id).unwrap();
         let loc_grad: f64 = loc_grad.into_scalar().elem();
         let scale_grad: f64 = scale_grad.into_scalar().elem();
 
         model = optimizer.step(config.lr, model, grads_container);
         let bhat_val: f64 = bhat.into_scalar().elem::<f64>();
 
-        if ix % 50 == 0 {
+        if ix % 10 == 0 {
             println!("BHat: {} ({})", bhat_val, ix / 100);
         }
         if loc_grad.abs() < epsilon && scale_grad.abs() < epsilon {
             break;
         }
-
+        ix += 1;
     }
 
-    println!("Starting end");
-    println!("Loc: {} [id={}]", model.loc.val().clone().into_scalar(), model.loc.id);
-    println!("Scale: {} [id={}]", model.scale.val().clone().into_scalar(), model.scale.id);
+    println!("Starting end (iters={})", ix);
+    println!("Loc: {}", model.loc.val().clone().into_scalar());
+    println!("Scale: {}", model.scale.val().clone().into_scalar());
 }
