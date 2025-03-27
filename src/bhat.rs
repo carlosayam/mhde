@@ -115,9 +115,9 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         loc: Param::from_tensor(loc),
         scale: Param::from_tensor(scale),
     };
-    println!("Starting val");
+    println!("Starting params");
     println!("Loc: {}", model.loc.val().clone().into_scalar());
-    println!("Scale: {}", model.scale.val().clone().into_scalar());
+    println!("Scale: {}\n", model.scale.val().clone().into_scalar());
 
     let mut optimizer = config.config_optimizer.init();
     let epsilon: f64 = 0.000001;
@@ -148,7 +148,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         ix += 1;
     }
 
-    println!("Starting end (iters={})", ix);
+    println!("\nEnd params (iterations={})", ix);
     println!("Loc: {}", model.loc.val().clone().into_scalar());
     println!("Scale: {}", model.scale.val().clone().into_scalar());
 }

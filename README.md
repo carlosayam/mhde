@@ -7,9 +7,7 @@ Example implementation of the B hat estimator in Rust / Burn.
 Using [Burn](https://burn.dev/) as it seems a promising alternative to Python's torch,
 although this estimator is _not_ a traditional NN model.
 
-Implements the estimator in paper.pdf, equations (3) and (4).
-
-At the moment, it does not work.
+Implements the estimator in [paper.pdf](paper.pdf), equations (3) and (4).
 
 1. Install Rust and Cargo
 
@@ -17,12 +15,13 @@ At the moment, it does not work.
 
 3. Run `cargo run` to run it
 
-Currently, produces the following output
+Currently, produces the following output approximating Cauchy distributed data with a `Cauchy(loc, scale)` distribution. The original parameters are `loc=20`, `scale=3`.
 
 ```
-Starting val
+Starting params
 Loc: 30.047816198115136
 Scale: 0.8864389687591542
+
 BHat: -0.6149687233691192 (0)
 BHat: -0.721162539450469 (0)
 BHat: -0.7928300035043044 (0)
@@ -51,7 +50,8 @@ BHat: -1.0049837883809924 (2)
 BHat: -1.0049837925878087 (2)
 BHat: -1.004983798821189 (2)
 BHat: -1.0049838009965577 (2)
-Starting end (iters=284)
+
+End params (iterations=284)
 Loc: 20.00930054231659
 Scale: 2.677800595406431
 ```
