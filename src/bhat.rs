@@ -56,9 +56,9 @@ fn calculate_balls<B: Backend>(data: &Vec<f64>, device: &B::Device) -> (Tensor<B
     let nn_index = algo.from_batch(&arr, L1Dist).unwrap();
 
     let radii: Vec<f64> = data2.iter()
-        .map(|pt: &f64| (nn_index.k_nearest((array![*pt]).view(), 2).unwrap(), pt))
+        .map(|pt: &f64| (nn_index.k_nearest((array![*pt]).view(), 1).unwrap(), pt))
         .map(|resp: (Vec<(ndarray::ArrayBase<ndarray::ViewRepr<&f64>, ndarray::Dim<[usize; 1]>>, usize)>, &f64)|
-                    (resp.1 - resp.0[1].0[0]).abs())  // distance to nearest neighbour
+                    (resp.1 - resp.0[0].0[0]).abs())  // distance to nearest neighbour
         .map(|v: f64| v * 2.0)                        // ball volume in dimension 1
         .collect();
 
