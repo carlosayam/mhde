@@ -43,23 +43,29 @@ impl<B: AutodiffBackend> BHatModel<B> {
     }
 }
 
-fn calculate_balls<B: Backend>(data: &Vec<f64>, device: &B::Device) -> Tensor<B, 1> {
+fn calculate_balls<B: Backend>(data: &Vec<f64>, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
     let num = data.len();
 
-    let algo = BallTree::new();
-    let arr = Array::from_shape_vec([num, 1], data.clone()).unwrap();
-    let arr = arr.view();
+    // split data in two parts: for Volumes and for Points
+    let data1 = &data[0..(num / 2)];
+    let data2 = &data[(num / 2)..];
 
+    let algo = BallTree::new();
+    let arr = Array::from_shape_vec([num / 2, 1], data1.to_vec()).unwrap();
+    let arr = arr.view();
     let nn_index = algo.from_batch(&arr, L1Dist).unwrap();
 
-    let radii: Vec<f64> = data.iter()
+    let radii: Vec<f64> = data2.iter()
         .map(|pt: &f64| (nn_index.k_nearest((array![*pt]).view(), 2).unwrap(), pt))
         .map(|resp: (Vec<(ndarray::ArrayBase<ndarray::ViewRepr<&f64>, ndarray::Dim<[usize; 1]>>, usize)>, &f64)|
                     (resp.1 - resp.0[1].0[0]).abs())  // distance to nearest neighbour
         .map(|v: f64| v * 2.0)                        // ball volume in dimension 1
         .collect();
 
-    Tensor::from_data(radii.as_slice(), device)
+    (
+        Tensor::from_data(data2, device),
+        Tensor::from_data(radii.as_slice(), device)
+    )
 }
 
 fn min_median_max(numbers: &Vec<f64>) -> (f64, f64, f64) {
@@ -97,7 +103,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let config = TrainingConfig::new(config_optimizer);
 
     let mut rng: ChaCha8Rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let num: usize = 8000;
+    let num: usize = 2000;
 
     // create random vec
     let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
@@ -109,7 +115,6 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
 
     let loc = Tensor::from_data([v_med], &device);
     let scale = Tensor::from_data([(v_max - v_min) / (num as f64)], &device);
-    let data = Tensor::from_data(vec.as_slice(), &device);
 
     let mut model = BHatModel {
         loc: Param::from_tensor(loc),
@@ -126,7 +131,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
     let mut ix = 1;
     while ix <= config.num_runs {
 
-        let bhat = model.forward(&data, &balls) * factor;
+        let bhat = model.forward(&balls.0, &balls.1) * factor;
 
         let grads = bhat.backward();
 
