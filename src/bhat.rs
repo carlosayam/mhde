@@ -43,22 +43,23 @@ impl<B: AutodiffBackend> BHatModel<B> {
     }
 }
 
-fn calculate_balls<B: Backend>(data: &Vec<f64>, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
+fn calculate_balls<B: Backend>(data: &Vec<f64>, split: bool, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
     let num = data.len();
 
     // split data in two parts: for Volumes and for Points
-    let data1 = &data[0..(num / 2)];
-    let data2 = &data[(num / 2)..];
+    let data1 = if split { &data[0..(num / 2)] } else { &data[..] };
+    let data2 = if split { &data[(num / 2)..] } else { &data[..] };
 
     let algo = BallTree::new();
-    let arr = Array::from_shape_vec([num / 2, 1], data1.to_vec()).unwrap();
+    let arr = Array::from_shape_vec([data1.len(), 1], data1.to_vec()).unwrap();
     let arr = arr.view();
     let nn_index = algo.from_batch(&arr, L1Dist).unwrap();
+    let pos_nearest = if split { 0 } else { 1 };
 
     let radii: Vec<f64> = data2.iter()
-        .map(|pt: &f64| (nn_index.k_nearest((array![*pt]).view(), 1).unwrap(), pt))
+        .map(|pt: &f64| (nn_index.k_nearest((array![*pt]).view(), pos_nearest + 1).unwrap(), pt))
         .map(|resp: (Vec<(ndarray::ArrayBase<ndarray::ViewRepr<&f64>, ndarray::Dim<[usize; 1]>>, usize)>, &f64)|
-                    (resp.1 - resp.0[0].0[0]).abs())  // distance to nearest neighbour
+                    (resp.1 - resp.0[pos_nearest].0[0]).abs())  // distance to nearest neighbour
         .map(|v: f64| v * 2.0)                        // ball volume in dimension 1
         .collect();
 
@@ -88,29 +89,33 @@ pub struct TrainingConfig {
     #[config(default = 1000)]
     pub num_runs: usize,
 
-    #[config(default = 41)]
-    pub seed: u64,
-
     #[config(default = 0.1)]
     pub lr: f64,
 
     pub config_optimizer: AdamConfig,
 }
 
-pub fn run<B: AutodiffBackend>(device: B::Device) {
+pub fn run<B: AutodiffBackend>(
+    num: usize,
+    split: bool,
+    seed: Option<u64>,
+    device: B::Device,
+) {
     // some global refs
     let config_optimizer = AdamConfig::new();
     let config = TrainingConfig::new(config_optimizer);
 
-    let mut rng: ChaCha8Rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let num: usize = 2000;
+    let mut rng: ChaCha8Rng = match seed {
+        Some(val) => ChaCha8Rng::seed_from_u64(val),
+        None => ChaCha8Rng::from_entropy(),
+    };
 
     // create random vec
     let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
     let vec = Vec::from_iter((0..num).map(|_| dist.sample(&mut rng)));
 
     let (v_min, v_med, v_max) = min_median_max(&vec);
-    let balls = calculate_balls::<B>(&vec, &device);
+    let balls = calculate_balls::<B>(&vec, split, &device);
     let factor = -2.0 / ((num as f64) * PI).sqrt();   // makes negative so we minimize BHat
 
     let loc = Tensor::from_data([v_med], &device);
@@ -121,6 +126,7 @@ pub fn run<B: AutodiffBackend>(device: B::Device) {
         scale: Param::from_tensor(scale),
     };
     println!("Sample size: {}", vec.len());
+    println!("Sum length: {:?}", &balls.0.shape());
     println!("Starting params");
     println!("Loc: {}", model.loc.val().clone().into_scalar());
     println!("Scale: {}\n", model.scale.val().clone().into_scalar());
