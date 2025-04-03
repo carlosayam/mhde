@@ -30,31 +30,32 @@ pub struct BHatModel<B: Backend> {
 }
 
 impl<B: AutodiffBackend> BHatModel<B> {
-    pub fn forward(&self, data: &Tensor<B, 1>, balls: &Tensor<B, 1>) -> Tensor<B, 1> {
+    pub fn forward(&self, data: &Tensor<B, 1>, balls: &Tensor<B, 1>, factor: f64) -> Tensor<B, 1> {
         // calculate Pdf_{Cauchy(l,s)}(data) =
         // \frac{1}{\pi s (1 + (\frac{x - l}{s})^2)}; l = loc, s = scale
         let v = (self.loc.val() - data.clone()) / self.scale.val();
         let v = v.powi_scalar(2);
         let v = (v + 1.0) * self.scale.val() * PI;
         let pdf = v.powi_scalar(-1);
-        // now calculate B hat, eq (3) in paper (the normalizing factor is applied later)
+        // now calculate Hellinger Distance squared estimator, eqs (2) & (3) in paper
         let v = (pdf * balls.clone()).powf_scalar(0.5);
-        v.sum()
+        v.sum() * (-factor) + 1.0
     }
 }
 
-fn calculate_balls<B: Backend>(data: &Vec<f64>, split: bool, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
-    let num = data.len();
+fn calculate_balls<B: Backend>(data: &Vec<f64>, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
 
-    // split data in two parts: for Volumes and for Points
-    let data1 = if split { &data[0..(num / 2)] } else { &data[..] };
-    let data2 = if split { &data[(num / 2)..] } else { &data[..] };
+    // considered that the sample could be split to ensure i.i.d terms in the sum
+    // but there were no apparent benefits; leaving this legacy in case need to investigate
+    // again
+    let data1 = &data[..];  // slice used for calculate volume to nearest
+    let data2 = &data[..];  // slice used to iterate points
 
     let algo = BallTree::new();
     let arr = Array::from_shape_vec([data1.len(), 1], data1.to_vec()).unwrap();
     let arr = arr.view();
     let nn_index = algo.from_batch(&arr, L1Dist).unwrap();
-    let pos_nearest = if split { 0 } else { 1 };
+    let pos_nearest = 1;
 
     let radii: Vec<f64> = data2.iter()
         .map(|pt: &f64| (nn_index.k_nearest((array![*pt]).view(), pos_nearest + 1).unwrap(), pt))
@@ -89,7 +90,7 @@ pub struct TrainingConfig {
     #[config(default = 1000)]
     pub num_runs: usize,
 
-    #[config(default = 0.1)]
+    #[config(default = 0.25)]
     pub lr: f64,
 
     pub config_optimizer: AdamConfig,
@@ -97,7 +98,6 @@ pub struct TrainingConfig {
 
 pub fn run<B: AutodiffBackend>(
     num: usize,
-    split: bool,
     seed: Option<u64>,
     device: B::Device,
 ) {
@@ -115,8 +115,8 @@ pub fn run<B: AutodiffBackend>(
     let vec = Vec::from_iter((0..num).map(|_| dist.sample(&mut rng)));
 
     let (v_min, v_med, v_max) = min_median_max(&vec);
-    let balls = calculate_balls::<B>(&vec, split, &device);
-    let factor = -2.0 / ((num as f64) * PI).sqrt();   // makes negative so we minimize BHat
+    let balls = calculate_balls::<B>(&vec, &device);
+    let factor = 2.0 / ((num as f64) * PI).sqrt();
 
     let loc = Tensor::from_data([v_med], &device);
     let scale = Tensor::from_data([(v_max - v_min) / (num as f64)], &device);
@@ -126,7 +126,6 @@ pub fn run<B: AutodiffBackend>(
         scale: Param::from_tensor(scale),
     };
     println!("Sample size: {}", vec.len());
-    println!("Sum length: {:?}", &balls.0.shape());
     println!("Starting params");
     println!("Loc: {}", model.loc.val().clone().into_scalar());
     println!("Scale: {}\n", model.scale.val().clone().into_scalar());
@@ -137,9 +136,9 @@ pub fn run<B: AutodiffBackend>(
     let mut ix = 1;
     while ix <= config.num_runs {
 
-        let bhat = model.forward(&balls.0, &balls.1) * factor;
+        let hd = model.forward(&balls.0, &balls.1, factor);
 
-        let grads = bhat.backward();
+        let grads = hd.backward();
 
         let grads_container = GradientsParams::from_grads(grads, &model);
 
@@ -149,10 +148,10 @@ pub fn run<B: AutodiffBackend>(
         let scale_grad: f64 = scale_grad.into_scalar().elem();
 
         model = optimizer.step(config.lr, model, grads_container);
-        let bhat_val: f64 = bhat.into_scalar().elem::<f64>();
+        let bhat_val: f64 = hd.into_scalar().elem::<f64>();
 
         if ix % 10 == 0 {
-            println!("BHat: {} ({})", bhat_val, ix);
+            println!("HD^2: {} ({})", bhat_val, ix);
         }
         if loc_grad.abs() < epsilon && scale_grad.abs() < epsilon {
             break;
