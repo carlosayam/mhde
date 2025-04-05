@@ -2647,6 +2647,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mhde"
+version = "0.1.0"
+dependencies = [
+ "argparse",
+ "burn",
+ "linfa-nn",
+ "ndarray 0.15.6",
+ "num-traits",
+ "rand",
+ "rand_chacha",
+ "rand_core",
+ "statrs",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3003,21 +3018,6 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
-
-[[package]]
-name = "par-nn"
-version = "0.1.0"
-dependencies = [
- "argparse",
- "burn",
- "linfa-nn",
- "ndarray 0.15.6",
- "num-traits",
- "rand",
- "rand_chacha",
- "rand_core",
- "statrs",
-]
 
 [[package]]
 name = "parking"

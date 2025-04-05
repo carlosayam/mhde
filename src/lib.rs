@@ -13,11 +13,6 @@ use burn::{
 use core::f64;
 use std::f64::consts::PI;
 
-use rand_chacha::ChaCha8Rng;
-use rand_core::SeedableRng;
-
-use rand::distributions::Distribution;
-use statrs::distribution::Cauchy;
 use linfa_nn::{BallTree, distance::L1Dist, NearestNeighbour};
 use ndarray::{Array, array};
 
@@ -43,13 +38,14 @@ impl<B: AutodiffBackend> BHatModel<B> {
     }
 }
 
-fn calculate_balls<B: Backend>(data: &Vec<f64>, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
+fn calculate_balls<B: Backend>(data: &Vec<f64>, split: bool, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
 
     // considered that the sample could be split to ensure i.i.d terms in the sum
     // but there were no apparent benefits; leaving this legacy in case need to investigate
     // again
-    let data1 = &data[..];  // slice used for calculate volume to nearest
-    let data2 = &data[..];  // slice used to iterate points
+    let num = data.len();
+    let data1 = if split { &data[0..(num / 2)] } else { &data[..] };  // slice used for calculate volume to nearest
+    let data2 = if split { &data[(num / 2)..] } else { &data[..] };   // slice used to iterate points
 
     let algo = BallTree::new();
     let arr = Array::from_shape_vec([data1.len(), 1], data1.to_vec()).unwrap();
@@ -97,25 +93,18 @@ pub struct TrainingConfig {
 }
 
 pub fn run<B: AutodiffBackend>(
-    num: usize,
-    seed: Option<u64>,
+    vec: Vec<f64>,
+    split: bool,
     device: B::Device,
 ) {
     // some global refs
     let config_optimizer = AdamConfig::new();
     let config = TrainingConfig::new(config_optimizer);
 
-    let mut rng: ChaCha8Rng = match seed {
-        Some(val) => ChaCha8Rng::seed_from_u64(val),
-        None => ChaCha8Rng::from_entropy(),
-    };
-
-    // create random vec
-    let dist: Cauchy = Cauchy::new(20.0, 3.0).unwrap();
-    let vec = Vec::from_iter((0..num).map(|_| dist.sample(&mut rng)));
+    let num = vec.len();
 
     let (v_min, v_med, v_max) = min_median_max(&vec);
-    let balls = calculate_balls::<B>(&vec, &device);
+    let balls = calculate_balls::<B>(&vec, split, &device);
     let factor = 2.0 / ((num as f64) * PI).sqrt();
 
     let loc = Tensor::from_data([v_med], &device);
@@ -126,6 +115,7 @@ pub fn run<B: AutodiffBackend>(
         scale: Param::from_tensor(scale),
     };
     println!("Sample size: {}", vec.len());
+    println!("Sum 0..{}", balls.0.shape().dims[0]);
     println!("Starting params");
     println!("Loc: {}", model.loc.val().clone().into_scalar());
     println!("Scale: {}\n", model.scale.val().clone().into_scalar());
@@ -151,7 +141,7 @@ pub fn run<B: AutodiffBackend>(
         let bhat_val: f64 = hd.into_scalar().elem::<f64>();
 
         if ix % 10 == 0 {
-            println!("HD^2: {} ({})", bhat_val, ix);
+            println!("HD^2 Hat: {} ({})", bhat_val, ix);
         }
         if loc_grad.abs() < epsilon && scale_grad.abs() < epsilon {
             break;
