@@ -1,7 +1,17 @@
 [package]
-name = "par-nn"
+name = "mhde"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+crate-type = ["lib"]
+name = "mhde"
+path = "src/lib.rs"
+
+[[example]]
+name = "cauchy"
+path = "examples/cauchy.rs"
+
 
 [dependencies]
 burn = { version = "0.16.0", features = ["autodiff", "ndarray"] }
