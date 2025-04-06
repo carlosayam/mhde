@@ -1,12 +1,7 @@
 use burn::{
-    module::{
-        Module,
-        Param,
-    },
+    module::{AutodiffModule, ModuleVisitor, ParamId},
     optim::{AdamConfig, GradientsParams, Optimizer},
-    prelude::{
-        Backend, Config, Tensor
-    },
+    prelude::{Backend, Tensor},
     tensor::backend::AutodiffBackend,
 };
 
@@ -18,24 +13,21 @@ use ndarray::{Array, array};
 
 use burn::tensor::ElementConversion;
 
-#[derive(Module, Debug)]
-pub struct BHatModel<B: Backend> {
-    loc: Param<Tensor<B, 1>>,
-    scale: Param<Tensor<B, 1>>,
+pub trait ModelTrait<B: AutodiffBackend>: AutodiffModule<B> {
+    fn pdf(&self, data: &Tensor<B, 1>) -> Tensor<B, 1>;
 }
 
-impl<B: AutodiffBackend> BHatModel<B> {
-    pub fn forward(&self, data: &Tensor<B, 1>, balls: &Tensor<B, 1>, factor: f64) -> Tensor<B, 1> {
-        // calculate Pdf_{Cauchy(l,s)}(data) =
-        // \frac{1}{\pi s (1 + (\frac{x - l}{s})^2)}; l = loc, s = scale
-        let v = (self.loc.val() - data.clone()) / self.scale.val();
-        let v = v.powi_scalar(2);
-        let v = (v + 1.0) * self.scale.val() * PI;
-        let pdf = v.powi_scalar(-1);
-        // now calculate Hellinger Distance squared estimator, eqs (2) & (3) in paper
-        let v = (pdf * balls.clone()).powf_scalar(0.5);
-        v.sum() * (-factor) + 1.0
-    }
+pub fn forward<B: AutodiffBackend, M: ModelTrait<B>>(
+    model: &M,
+    data: &Tensor<B, 1>,
+    balls: &Tensor<B, 1>
+) -> Tensor<B, 1> {
+    let pdf = model.pdf(data);
+    // now calculate Hellinger Distance squared estimator, eqs (2) & (3) in paper
+    let v = (pdf * balls.clone()).powf_scalar(0.5);
+    let num = data.shape().dims[0];
+    let factor = - 2.0 / ((num as f64) * PI).sqrt();
+    v.sum() * factor + 1.0
 }
 
 fn calculate_balls<B: Backend>(data: &Vec<f64>, split: bool, device: &B::Device) -> (Tensor<B, 1>, Tensor<B, 1>) {
@@ -66,90 +58,75 @@ fn calculate_balls<B: Backend>(data: &Vec<f64>, split: bool, device: &B::Device)
     )
 }
 
-fn min_median_max(numbers: &Vec<f64>) -> (f64, f64, f64) {
-
-    let mut to_sort = numbers.clone();
-    to_sort.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    
-    let mid = numbers.len() / 2;
-    let med = if numbers.len() % 2 == 0 {
-        (numbers[mid - 1] + numbers[mid]) / 2.0
-    } else {
-        numbers[mid]
-    };
-    (to_sort[0], med, to_sort[numbers.len()-1])
-}
-
-#[derive(Config)]
 pub struct TrainingConfig {
-
-    #[config(default = 1000)]
     pub num_runs: usize,
-
-    #[config(default = 0.25)]
     pub lr: f64,
-
     pub config_optimizer: AdamConfig,
 }
 
-pub fn run<B: AutodiffBackend>(
+struct GradientCheck<'a, B: AutodiffBackend> {
+    epsilon: f64,
+    is_less: bool,
+    grads: &'a B::Gradients,
+}
+
+impl<B: AutodiffBackend> ModuleVisitor<B> for GradientCheck<'_, B> {
+    fn visit_float<const D: usize>(&mut self, _id: ParamId, tensor: &Tensor<B, D>) {
+        if self.is_less {
+            let val: f64 = tensor.grad(&self.grads).unwrap().into_scalar().elem();
+            self.is_less = val.abs() < self.epsilon;
+        }
+    }
+}
+
+pub fn run<B: AutodiffBackend, M: ModelTrait<B>>(
+    mut model: M,
     vec: Vec<f64>,
     split: bool,
     device: B::Device,
-) {
-    // some global refs
-    let config_optimizer = AdamConfig::new();
-    let config = TrainingConfig::new(config_optimizer);
+) -> (usize, M) {
 
-    let num = vec.len();
-
-    let (v_min, v_med, v_max) = min_median_max(&vec);
-    let balls = calculate_balls::<B>(&vec, split, &device);
-    let factor = 2.0 / ((num as f64) * PI).sqrt();
-
-    let loc = Tensor::from_data([v_med], &device);
-    let scale = Tensor::from_data([(v_max - v_min) / (num as f64)], &device);
-
-    let mut model = BHatModel {
-        loc: Param::from_tensor(loc),
-        scale: Param::from_tensor(scale),
+    let config = TrainingConfig {
+        num_runs: 1000,
+        lr: 0.25,
+        config_optimizer: AdamConfig::new(),
     };
-    println!("Sample size: {}", vec.len());
-    println!("Sum 0..{}", balls.0.shape().dims[0]);
-    println!("Starting params");
-    println!("Loc: {}", model.loc.val().clone().into_scalar());
-    println!("Scale: {}\n", model.scale.val().clone().into_scalar());
 
-    let mut optimizer = config.config_optimizer.init();
+    let balls = calculate_balls::<B>(&vec, split, &device);
+
+    let mut optimizer = config.config_optimizer.init::<B, M>();
     let epsilon: f64 = 0.000001;
 
     let mut ix = 1;
     while ix <= config.num_runs {
 
-        let hd = model.forward(&balls.0, &balls.1, factor);
+        let hd = forward(&model, &balls.0, &balls.1);
 
         let grads = hd.backward();
 
+        let is_less = {
+            let mut grad_check = GradientCheck {
+                epsilon,
+                is_less: true,
+                grads: &grads,
+            };
+            model.visit(&mut grad_check);
+            grad_check.is_less
+        };
+        
         let grads_container = GradientsParams::from_grads(grads, &model);
 
-        let loc_grad = grads_container.get::<B::InnerBackend, 1>(model.loc.id).unwrap();
-        let scale_grad = grads_container.get::<B::InnerBackend, 1>(model.scale.id).unwrap();
-        let loc_grad: f64 = loc_grad.into_scalar().elem();
-        let scale_grad: f64 = scale_grad.into_scalar().elem();
-
         model = optimizer.step(config.lr, model, grads_container);
+
         let bhat_val: f64 = hd.into_scalar().elem::<f64>();
 
         if ix % 10 == 0 {
             println!("HD^2 Hat: {} ({})", bhat_val, ix);
         }
-        if loc_grad.abs() < epsilon && scale_grad.abs() < epsilon {
+        if is_less {
             break;
         }
         ix += 1;
     }
-
-    println!("\nEnd params (iterations={})", ix);
-    println!("Loc: {}", model.loc.val().clone().into_scalar());
-    println!("Scale: {}", model.scale.val().clone().into_scalar());
+    (ix, model)
 }
