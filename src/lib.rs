@@ -13,17 +13,21 @@ use ndarray::{Array, array};
 
 use burn::tensor::ElementConversion;
 
+/// A Burn Module must implement a `pdf` on data function
 pub trait ModelTrait<B: AutodiffBackend>: AutodiffModule<B> {
     fn pdf(&self, data: &Tensor<B, 1>) -> Tensor<B, 1>;
 }
 
+/// This `forward` function calculates the estimate for
+/// squared Hellinger distance. At the moment, it assumes that
+/// the volume balls do not depend on the parameters of the model.
 pub fn forward<B: AutodiffBackend, M: ModelTrait<B>>(
     model: &M,
     data: &Tensor<B, 1>,
     balls: &Tensor<B, 1>
 ) -> Tensor<B, 1> {
     let pdf = model.pdf(data);
-    // now calculate Hellinger Distance squared estimator, eqs (2) & (3) in paper
+    // now calculate Hellinger Distance squared estimator, eqs (3) & (4) in paper
     let v = (pdf * balls.clone()).powf_scalar(0.5);
     let num = data.shape().dims[0];
     let factor = - 2.0 / ((num as f64) * PI).sqrt();
