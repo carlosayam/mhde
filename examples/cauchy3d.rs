@@ -143,7 +143,7 @@ fn main() {
     // matrix and apply the operation to data
 
     // items on the diagonal: n (obviously)
-    let data: Vec<f64> = Vec::from_iter((0..dim).map(|_| dist.sample(&mut rng).abs() + 0.5));
+    let data: Vec<f64> = Vec::from_iter((0..dim).map(|_| dist.sample(&mut rng)));
     let diagonal = Param::from_tensor(Tensor::<AutoBE, 1>::from_data(data.as_slice(), &device));
 
     println!("Diag Param >> {:}", diagonal.val());
@@ -178,8 +178,11 @@ fn main() {
 
     // reshape, transpose and get covariance matrix
     let matrix = flat.reshape([dim, dim]);
+    // println!("{:}", matrix);
     let matrix_t = matrix.clone().transpose();
-    let cov_matrix = matrix.mul(matrix_t);
+    // println!("{:}", matrix_t);
+    let cov_matrix = matrix.matmul(matrix_t);
+    // println!("{:}", cov_matrix);
 
     println!("Matrix >> {:}", cov_matrix);
 
