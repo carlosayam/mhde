@@ -12,6 +12,9 @@ path = "src/lib.rs"
 name = "cauchy"
 path = "examples/cauchy.rs"
 
+[[example]]
+name = "cauchy3d"
+path = "examples/cauchy3d.rs"
 
 [dependencies]
 burn = { version = "0.16.0", features = ["autodiff", "ndarray"] }

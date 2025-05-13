@@ -127,7 +127,7 @@ fn main() {
         model,
         vec,
         options.split,
-        Default::default(),
+        device,
     );
 
     println!("Final params (iters={})", iters);

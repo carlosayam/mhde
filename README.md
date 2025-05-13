@@ -50,3 +50,9 @@ End params (iterations=226)
 Loc: 20.025672551184265
 Scale: 3.0323162228343508
 ```
+
+4. Documentation
+
+```
+cargo doc --no-deps
+```
