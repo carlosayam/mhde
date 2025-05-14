@@ -6,7 +6,9 @@ use burn::{
         NdArray
     }, module::{
         Module,
-        Param
+        Param,
+        ModuleVisitor,
+        ParamId,
     }, prelude::{
         Backend, Tensor
     }, tensor::{backend::AutodiffBackend, TensorData},
@@ -15,7 +17,6 @@ use argparse::{ArgumentParser, Store, StoreOption, StoreTrue};
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
-
 use rand::distributions::Distribution;
 use statrs::distribution::{Cauchy, Normal};
 use std::f64::consts::PI;
@@ -146,13 +147,13 @@ fn main() {
     let data: Vec<f64> = Vec::from_iter((0..dim).map(|_| dist.sample(&mut rng)));
     let diagonal = Param::from_tensor(Tensor::<AutoBE, 1>::from_data(data.as_slice(), &device));
 
-    println!("Diag Param >> {:}", diagonal.val());
+    println!("Diag Param >> {:} = {:}", diagonal.id, diagonal.val());
 
     // items below the diagonal: n * (n-1) / 2
     let dim2 = dim * (dim - 1) / 2;
     let data: Vec<f64> = Vec::from_iter((0..dim2).map(|_| dist.sample(&mut rng)));
     let lower = Param::from_tensor(Tensor::<AutoBE, 1>::from_data(data.as_slice(), &device));
-    println!("Lower Param >> {:}", lower.val());
+    println!("Lower Param >> {:} = {:}", lower.id, lower.val());
 
     // given parameters diagonal and lower, below compose those into a lower triangular
     // matrix with positive diagonal entries
@@ -193,4 +194,11 @@ fn main() {
 
     println!("Transform >>\n{:}", data2);
 
+    let grads = data2.backward();
+
+    let diagonal_grad = diagonal.grad(&grads).unwrap();
+    println!("Diag grad = {:}", diagonal_grad);
+
+    let lower_grad = lower.grad(&grads).unwrap();
+    println!("Lower grad = {:}", lower_grad);
 }
