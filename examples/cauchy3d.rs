@@ -20,15 +20,17 @@ use rand_core::SeedableRng;
 use rand::distributions::Distribution;
 use statrs::distribution::{Cauchy, Normal};
 use std::f64::consts::PI;
+use std::fs;
+use ndarray::{array, Array1, Array2};
 
 
-/// A Cauchy 2D distribution, defined using location in 2D and
-/// the Cholesky decomposition for the covariance matrix expressed
-/// as the diagonal items (2 elements) and the bottom real (1) = 3 elements
+/// A Cauchy+Normal 3D distribution, defined using location in 3D and
+/// the Cholesky decomposition for the covariance matrix
 #[derive(Module, Debug)]
-pub struct CauchyModel2d<B: Backend> {
-    loc: Param<Tensor<B, 2>>,
-    cholesky: Param<Tensor<B, 1>>,
+pub struct CauchyModel3d<B: Backend> {
+    loc: Param<Tensor<B, 1>>,
+    diagonal: Param<Tensor<B, 1>>,
+    lower: Param<Tensor<B, 1>>,
 }
 
 // impl<B> ModelTrait<B> for CauchyModel2d<B>
@@ -46,23 +48,21 @@ pub struct CauchyModel2d<B: Backend> {
 // }
 
 struct Options {
-    loc: f64,
-    scale: f64,
     num: usize,
     seed: Option<u64>,
     split: bool,
 }
 
+struct GeneratorParams {
+    loc: Array1<f64>,
+    scale: Array1<f64>,
+    matrix: Array2<f64>,
+}
+
 fn set_options(options: &mut Options) {
     let mut parser = ArgumentParser::new();
 
-    parser.set_description("Minimum Helliger Distance Estimator for Cauchy-distributed 1D sample and model");
-
-    parser.refer(&mut options.loc)
-        .add_argument("loc", Store, "Location of Cauchy distribution to generate a sample (def 0.0)");
-
-    parser.refer(&mut options.scale)
-    .add_argument("scale", Store, "Scale of Cauchy distribution to generate a sample (def 1.0)");
+    parser.set_description("Minimum Helliger Distance Estimator for Cauchy+Normal 3D sample and model");
 
     parser.refer(&mut options.num)
         .add_argument("num", Store, "Number of observations (def 1000)");
@@ -76,18 +76,38 @@ fn set_options(options: &mut Options) {
     parser.parse_args_or_exit();
 }
 
-// /// Generates Cauchy distributed sample 
-// fn generate(options: &Options) -> Vec<f64> {
-//     let mut rng: ChaCha8Rng = match options.seed {
-//         Some(val) => ChaCha8Rng::seed_from_u64(val),
-//         None => ChaCha8Rng::from_entropy(),
-//     };
+/// Generates distributed sample 
+fn generate(options: &Options) -> Vec<Array1<f64>> {
+    let mut rng: ChaCha8Rng = match options.seed {
+        Some(val) => ChaCha8Rng::seed_from_u64(val),
+        None => ChaCha8Rng::from_entropy(),
+    };
 
-//     // create random vec
-//     let dist: Cauchy = Cauchy::new(options.loc, options.scale).expect("Wrong parameters for Cauchy distribution");
-//     let vec = Vec::from_iter((0..options.num).map(|_| dist.sample(&mut rng)));
-//     vec
-// }
+    // Mathematica:
+    // RotationMatrix[30 Degree, {1, 0, 0}] . RotationMatrix[45 Degree, {0, 1, 0}] // N
+    // {{0.707107, 0., 0.707107}, {0.353553, 0.866025, -0.353553}, {-0.612372, 0.5, 0.612372}}
+    let params = GeneratorParams {
+        loc: array![0.0, -1.0, 1.0],
+        scale: array![1.0, 2.0, 3.0],
+        matrix: array![[0.707107, 0., 0.707107],
+            [0.353553, 0.866025, -0.353553],
+            [-0.612372, 0.5, 0.612372]],
+    };
+
+    // create random vector by creating 3 Cauchy distributions for each dimension
+    // as per params loc and scale and then apply matrix rotation
+    let dist: Vec<Cauchy> = (0..3).map(|ix| {
+        Cauchy::new(params.loc[ix], params.scale[ix]).unwrap()
+    }).collect();
+
+    let vec = Vec::from_iter((0..options.num).map(
+        |_| (0..3).map(|ix| dist[ix].sample(&mut rng)).collect::<Array1<f64>>()
+    ));
+
+    let vec = vec.iter().map(|row| row.dot(&params.matrix)).collect();
+
+    vec
+}
 
 // fn min_median_max(numbers: &Vec<f64>) -> (f64, f64, f64) {
 
@@ -119,6 +139,17 @@ fn set_options(options: &mut Options) {
 type AutoBE = Autodiff<NdArray<f64, i64>>;
 
 fn main() {
+    let device: <AutoBE as Backend>::Device = Default::default();
+    let dim = 3;
+    let options = Options {
+        num: 10,
+        seed: Some(42),
+        split: false,
+    };
+    let raw_data = generate(&options);
+}
+
+fn main_() {
     let device: <AutoBE as Backend>::Device = Default::default();
 
     let dim = 3;
